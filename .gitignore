@@ -1,0 +1,32 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+
+# Visual Studio / VS Code / JetBrains Rider
+.vs/
+.vscode/*.user
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# .NET tooling
+TestResults/
+*.nupkg
+*.snupkg
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+
+# OS-generated files
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Local development notes
+CLAUDE.md
+PLAN.md
+RESEARCH.md

@@ -1,0 +1,79 @@
+@page "/plugins/adjustments/sunfish.navmap"
+@implements IDisposable
+@using ETS2LA.UI.Shared.Components
+@using NavMap.Rendering
+
+<div class="flex flex-col w-108 m-5 ml-8 gap-6">
+    <h1 class="text-xl font-semibold">NavMap</h1>
+
+    @{
+        var settings = _plugin?.ViewSettings;
+    }
+    @if (_plugin is null || settings is null)
+    {
+        <p class="text-description">Plugin is not enabled. Enable NavMap from Plugin Manager first.</p>
+    }
+    else
+    {
+        <Slider Title="Background opacity"
+                Description="Opacity of the NavMap window's background fill."
+                Min="0" Max="100" Step="5"
+                Suffix="%"
+                Value="settings.BackgroundOpacityPercent"
+                ValueChanged="@(value => settings.BackgroundOpacityPercent = value)" />
+
+        <Switch Title="Hide when paused"
+                Description="Close the NavMap window while the game is paused, instead of leaving it open."
+                Value="settings.HideOverlayWhenPaused"
+                ValueChanged="@(value => settings.HideOverlayWhenPaused = value)" />
+
+        <section class="rounded-sm border border-bg-darker bg-control-bg-dark p-4">
+            <h2 class="mb-2 font-semibold">Diagnostics</h2>
+            <div class="grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-2 text-sm">
+                <span>Telemetry: @(_plugin.Pose.IsLive ? "live" : "down")</span>
+                <span>Map: @(_plugin.MapReady ? "ready" : "parsing")</span>
+                <span>Nav data: @(_plugin.RouteState.HasReceivedData ? "yes" : "no")</span>
+                <span>Route entries: @_plugin.RouteState.GetValidEntries().Count</span>
+                <span>Nearby roads: @_plugin.NearbyCache.Segments.Count</span>
+                <span>POI icons: @_plugin.NearbyCache.Icons.Count</span>
+                <span>Route points: @(_plugin.RouteBuilder.Points.Count)@(_plugin.RouteBuilder.UsedFallbackSegment ? " (approx)" : "")</span>
+            </div>
+            <p class="mt-2 text-description text-sm">This used to be drawn on the map itself; it now lives here to keep the Overlay uncluttered.</p>
+        </section>
+    }
+</div>
+
+@code {
+    private readonly PeriodicTimer _refreshTimer = new(TimeSpan.FromMilliseconds(500));
+    private readonly CancellationTokenSource _refreshCancellation = new();
+    private NavMapPlugin? _plugin;
+
+    protected override void OnInitialized()
+    {
+        _plugin = NavMapPlugin.Current;
+        _ = RefreshAsync();
+    }
+
+    private async Task RefreshAsync()
+    {
+        try
+        {
+            while (await _refreshTimer.WaitForNextTickAsync(_refreshCancellation.Token))
+            {
+                _plugin = NavMapPlugin.Current;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException) when (_refreshCancellation.IsCancellationRequested)
+        {
+            // The adjustments page was disposed.
+        }
+    }
+
+    public void Dispose()
+    {
+        _refreshCancellation.Cancel();
+        _refreshTimer.Dispose();
+        _refreshCancellation.Dispose();
+    }
+}
