@@ -129,4 +129,6 @@ To build against a newer ETS2LA, change `ETS2LA_REF` in the workflow to the new 
 
 - The map only appears while game telemetry is live and ETS2LA has finished loading the map data.
 - If the game's navigation has no route, NavMap shows roads only.
+- NavMap also shows roads your truck can't enter, not only roads it can drive on.
+- Even when a destination is set in the game's navigation, the green route line sometimes doesn't appear.
 - The north direction used by the compass hasn't been checked against the game yet, so it may point the wrong way.
