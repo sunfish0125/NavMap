@@ -6,6 +6,8 @@ It draws the route the game's own navigation has already planned. NavMap does no
 
 ## Features
 
+![NavMap showing nearby roads and POI icons in the ETS2LA Overlay, zoomed out to 2000 m](images/NavMap.png)
+
 - Heading-up map: your truck stays in the center and the map turns so the direction you're driving points up
 - Nearby roads, drawn lane by lane
 - The game's active route, highlighted in green
