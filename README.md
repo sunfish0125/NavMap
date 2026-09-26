@@ -26,14 +26,30 @@ This page also has a Diagnostics section. It shows whether telemetry, map data a
 
 NavMap saves your settings and zoom level to `%APPDATA%\ETS2LA\NavMapSettings.json` so they're kept after a restart.
 
-## Requirements
+## Install
+
+You don't need to build NavMap yourself to use it.
+
+1. Download the latest `NavMap-vX.Y.Z.zip` from the [Releases page](https://github.com/sunfish0125/NavMap/releases).
+2. Close ETS2LA if it's running.
+3. Extract `NavMap.dll` and `NavMap.deps.json` from the zip into the `Plugins` folder inside your ETS2LA installation folder (the folder that contains `ETS2LA.exe`). If there's no `Plugins` folder yet, start ETS2LA once and it creates one.
+4. Start ETS2LA and enable **NavMap** in Plugin Manager.
+5. Start ETS2 or ATS and set a destination in the game's navigation. The route then appears on the map.
+
+Each release is built against a specific ETS2LA commit, which the release notes list. If a newer ETS2LA changes its plugin API, NavMap may fail to load until a new NavMap release comes out.
+
+To update NavMap, close ETS2LA, replace the two files with the ones from the new release, and start ETS2LA again.
+
+## Building from source
+
+### Requirements
 
 - Windows
 - [.NET 10 SDK](https://dotnet.microsoft.com/download)
 - A local copy of the [ETS2LA](https://github.com/ETS2LA/ETS2LA) C# source, placed in a folder next to this repository
 - ETS2 or ATS, set up to work with ETS2LA
 
-## Folder layout
+### Folder layout
 
 NavMap builds against the ETS2LA source, so both folders must sit side by side:
 
@@ -43,7 +59,7 @@ NavMap builds against the ETS2LA source, so both folders must sit side by side:
 └─ NavMap\          this repository
 ```
 
-## Build and install
+### Build and install
 
 Run the build script from the `NavMap` folder:
 
@@ -58,7 +74,7 @@ The script:
 
 If the build fails, the script stops without copying any files.
 
-### Options
+#### Options
 
 | Option | Description |
 | --- | --- |
@@ -78,7 +94,7 @@ If PowerShell blocks the script because of the execution policy, run it this way
 powershell -ExecutionPolicy Bypass -File .\scripts\build-and-deploy.ps1
 ```
 
-### After deploying
+#### After deploying
 
 1. If ETS2LA is already running, close it completely. ETS2LA only loads the new plugin files when it starts, so disabling and re-enabling NavMap in Plugin Manager does not pick up the update.
 2. Start the ETS2LA build that matches the configuration you deployed to.
@@ -86,6 +102,26 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-and-deploy.ps1
 4. Start ETS2 or ATS and set a destination in the game's navigation. The route then appears on the map.
 
 Repeat these steps every time you build and deploy a new version.
+
+## Releasing
+
+Releases are built by GitHub Actions ([.github/workflows/release.yml](.github/workflows/release.yml)).
+
+1. Update `Version` in `Program.cs` (for example `0.2.0`) and commit it.
+2. Create a tag that matches it with a `v` prefix, and push the tag:
+
+   ```powershell
+   git tag v0.2.0
+   git push origin v0.2.0
+   ```
+
+3. The workflow checks out ETS2LA at the commit set in `ETS2LA_REF`, builds NavMap in Release mode, and creates a GitHub Release with `NavMap-v0.2.0.zip` attached.
+
+If the tag doesn't match `Version` in `Program.cs`, the workflow stops without creating a release.
+
+To try a build without releasing, run the workflow manually from the **Actions** tab. It uploads the zip contents as a workflow artifact instead.
+
+To build against a newer ETS2LA, change `ETS2LA_REF` in the workflow to the new commit. Check that NavMap still works with that ETS2LA version before you release.
 
 ## Known limitations
 

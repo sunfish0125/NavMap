@@ -1,0 +1,122 @@
+name: Release
+
+# Push a tag like "v0.1.0" to build NavMap and publish it as a GitHub Release.
+# Running the workflow manually builds the same zip and uploads it as a
+# workflow artifact only, without creating a release.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  # ETS2LA commit NavMap is built against. The released DLL uses this
+  # commit's plugin API, so update it deliberately and check that NavMap
+  # still works before releasing.
+  ETS2LA_REPOSITORY: ETS2LA/ETS2LA
+  ETS2LA_REF: 52416a782ad7d0838470b549fee3193ef70e22d3
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      # NavMap.csproj references ..\ETS2LA\..., so both repositories are
+      # checked out side by side, the same as the local development layout.
+      - name: Check out NavMap
+        uses: actions/checkout@v4
+        with:
+          path: NavMap
+
+      - name: Check out ETS2LA
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.ETS2LA_REPOSITORY }}
+          ref: ${{ env.ETS2LA_REF }}
+          path: ETS2LA
+          submodules: recursive
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      # ETS2LA.UI builds its Tailwind CSS with bun during the build.
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+
+      # ETS2LA.Translations runs the GetText.Extractor local tool during the build.
+      - name: Restore ETS2LA .NET tools
+        working-directory: ETS2LA
+        run: dotnet tool restore
+
+      - name: Determine version
+        id: version
+        run: |
+          $pluginVersion = Select-String -Path NavMap/Program.cs -Pattern 'Version = "([^"]+)"' |
+              Select-Object -First 1 |
+              ForEach-Object { $_.Matches[0].Groups[1].Value }
+          if (-not $pluginVersion) {
+              throw "Could not find the plugin Version in NavMap/Program.cs."
+          }
+
+          if ($env:GITHUB_REF_TYPE -eq "tag") {
+              $expectedTag = "v$pluginVersion"
+              if ($env:GITHUB_REF_NAME -ne $expectedTag) {
+                  throw "Tag '$env:GITHUB_REF_NAME' does not match the plugin Version '$pluginVersion' in Program.cs. Expected tag '$expectedTag'."
+              }
+              $label = $env:GITHUB_REF_NAME
+          } else {
+              $label = "v$pluginVersion-dev.$($env:GITHUB_SHA.Substring(0, 7))"
+          }
+
+          "label=$label" >> $env:GITHUB_OUTPUT
+
+      - name: Build NavMap
+        run: dotnet build NavMap/NavMap.csproj -c Release
+
+      - name: Package
+        id: package
+        run: |
+          $output = "NavMap/bin/Release/net10.0"
+          $staging = "package/NavMap"
+          New-Item -ItemType Directory -Force -Path $staging | Out-Null
+
+          foreach ($file in "NavMap.dll", "NavMap.deps.json") {
+              Copy-Item -LiteralPath (Join-Path $output $file) -Destination $staging
+          }
+
+          $zip = "NavMap-${{ steps.version.outputs.label }}.zip"
+          Compress-Archive -Path "$staging/*" -DestinationPath $zip
+          "zip=$zip" >> $env:GITHUB_OUTPUT
+
+      - name: Upload build artifact
+        if: github.ref_type != 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: NavMap-${{ steps.version.outputs.label }}
+          path: package/NavMap/*
+
+      - name: Create GitHub Release
+        if: github.ref_type == 'tag'
+        working-directory: NavMap
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $notes = @"
+          Built against ETS2LA commit [``$($env:ETS2LA_REF.Substring(0, 8))``](https://github.com/$env:ETS2LA_REPOSITORY/commit/$env:ETS2LA_REF).
+
+          To install, extract the zip into ETS2LA's ``Plugins`` folder and restart ETS2LA. See the README for details.
+          "@
+
+          gh release create $env:GITHUB_REF_NAME "../${{ steps.package.outputs.zip }}" `
+              --title "NavMap $env:GITHUB_REF_NAME" `
+              --notes $notes `
+              --generate-notes `
+              --verify-tag
