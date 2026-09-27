@@ -17,7 +17,7 @@ env:
   # commit's plugin API, so update it deliberately and check that NavMap
   # still works before releasing.
   ETS2LA_REPOSITORY: ETS2LA/ETS2LA
-  ETS2LA_REF: 52416a782ad7d0838470b549fee3193ef70e22d3
+  ETS2LA_REF: e9d66b0e5b56c0563d44c75b116562d943d3df8a # v2026.9.5092
 
 jobs:
   build:
