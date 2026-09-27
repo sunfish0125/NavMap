@@ -141,4 +141,3 @@ To build against a newer ETS2LA, change `ETS2LA_REF` in the workflow to the new 
 - Every traffic light within 150 m gets a marker, including lights for crossing roads and oncoming traffic. NavMap doesn't try to work out which light applies to your lane.
 - AR markers shrink with distance, but only down to 40% of full size, so far-away markers look larger than true perspective would make them.
 - NavMap can only mark traffic lights the game sends to ETS2LA. The Diagnostics section shows how many it received and how far away the nearest one is.
-- If you also have the standalone SignalHUD plugin enabled, both draw their own AR marker. Disable one of them.
