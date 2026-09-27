@@ -77,7 +77,7 @@ public class NavMapPlugin : Plugin
     public override PluginInformation Info => new()
     {
         Id = "sunfish.navmap",
-        Version = "0.1.0",
+        Version = "0.2.0",
         Name = "NavMap",
         Description = "Custom navigation map using the game's existing navigation route.",
         AuthorName = "Sunfish",

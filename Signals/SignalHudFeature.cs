@@ -35,6 +35,13 @@ public sealed class SignalHudFeature
 {
     private const float MaximumSignalDistance = 150f;
     private const float MarkerHeightAboveSignal = 2.5f;
+
+    // Markers shrink linearly with distance: full size up to
+    // FullSizeDistance, down to MinimumMarkerScale at MaximumSignalDistance.
+    // Not true 1/distance perspective, which would make the readout
+    // unreadably small well before the far end of the range.
+    private const float FullSizeDistance = 20f;
+    private const float MinimumMarkerScale = 0.4f;
     private const string ArRendererName = "NavMap Signal AR";
 
     private readonly SignalViewSettings settings;
@@ -169,26 +176,38 @@ public sealed class SignalHudFeature
         uint backgroundColor = (uint)Math.Clamp(
             MathF.Round(backgroundOpacity * byte.MaxValue), 0f, byte.MaxValue);
 
-        ImGui.PushFont(ImGui.GetFont(), ImGui.GetStyle().FontSizeBase * fontScale);
-        try
+        ImDrawListPtr drawList = ImGui.GetBackgroundDrawList();
+        float baseFontSize = ImGui.GetStyle().FontSizeBase * fontScale;
+        foreach (SignalMarker marker in markers)
         {
-            ImDrawListPtr drawList = ImGui.GetBackgroundDrawList();
-            foreach (SignalMarker marker in markers)
-                DrawMarker(drawList, marker, backgroundColor);
+            float scale = GetDistanceScale(marker.Distance);
+            ImGui.PushFont(ImGui.GetFont(), baseFontSize * scale);
+            try
+            {
+                DrawMarker(drawList, marker, backgroundColor, scale);
+            }
+            finally
+            {
+                ImGui.PopFont();
+            }
         }
-        finally
-        {
-            ImGui.PopFont();
-        }
+    }
+
+    private static float GetDistanceScale(float distance)
+    {
+        float t = Math.Clamp(
+            (distance - FullSizeDistance) / (MaximumSignalDistance - FullSizeDistance), 0f, 1f);
+        return 1f - t * (1f - MinimumMarkerScale);
     }
 
     /// <summary>
     ///  Same look as SignalHUD's marker (glowing dot with the remaining time and
     ///  distance below it, on a rounded black background), centered on the
     ///  signal's screen position. The background grows to fit the text, since
-    ///  the font size is adjustable.
+    ///  the font size is adjustable. Every size is multiplied by scale (the
+    ///  font is already pushed at the scaled size).
     /// </summary>
-    private static void DrawMarker(ImDrawListPtr drawList, SignalMarker marker, uint backgroundColor)
+    private static void DrawMarker(ImDrawListPtr drawList, SignalMarker marker, uint backgroundColor, float scale)
     {
         uint color = marker.Semaphore.GetColor();
         uint markerColor = ToImGuiColor(color);
@@ -196,18 +215,18 @@ public sealed class SignalHudFeature
 
         string readout = $"{marker.Semaphore.time_remaining:0.0}s\n{marker.Distance:0}m";
         Vector2 readoutSize = ImGui.CalcTextSize(readout);
-        Vector2 readoutPosition = new(center.X - readoutSize.X / 2f, center.Y + 25f);
+        Vector2 readoutPosition = new(center.X - readoutSize.X / 2f, center.Y + 25f * scale);
 
-        float halfWidth = MathF.Max(30f, readoutSize.X / 2f + 10f);
+        float halfWidth = MathF.Max(30f * scale, readoutSize.X / 2f + 10f * scale);
         drawList.AddRectFilled(
-            new Vector2(center.X - halfWidth, center.Y - 30f),
-            new Vector2(center.X + halfWidth, readoutPosition.Y + readoutSize.Y + 8f),
+            new Vector2(center.X - halfWidth, center.Y - 30f * scale),
+            new Vector2(center.X + halfWidth, readoutPosition.Y + readoutSize.Y + 8f * scale),
             ToImGuiColor(backgroundColor),
-            rounding: 12f);
-        drawList.AddCircleFilled(center, 20f, ToImGuiColor(WithAlpha(color, 20)));
-        drawList.AddCircleFilled(center, 14f, ToImGuiColor(WithAlpha(color, 45)));
-        drawList.AddCircleFilled(center, 9f, ToImGuiColor(WithAlpha(color, 100)));
-        drawList.AddCircleFilled(center, 6f, markerColor);
+            rounding: 12f * scale);
+        drawList.AddCircleFilled(center, 20f * scale, ToImGuiColor(WithAlpha(color, 20)));
+        drawList.AddCircleFilled(center, 14f * scale, ToImGuiColor(WithAlpha(color, 45)));
+        drawList.AddCircleFilled(center, 9f * scale, ToImGuiColor(WithAlpha(color, 100)));
+        drawList.AddCircleFilled(center, 6f * scale, markerColor);
         drawList.AddText(readoutPosition, markerColor, readout);
     }
 

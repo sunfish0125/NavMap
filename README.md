@@ -18,6 +18,8 @@ It draws the route the game's own navigation has already planned. NavMap does no
 - A map window you can move anywhere on screen and resize freely
 - AR markers on every traffic light within 150 m, drawn at the light's position and showing its color, remaining time and distance (merged from the SignalHUD plugin)
 
+![AR markers on three traffic lights ahead, each showing its light color, remaining time and distance, with nearer markers drawn larger](images/SignalMarker.png)
+
 ## Settings
 
 Open **Plugin Manager → NavMap → Adjustments** to change:
@@ -137,6 +139,6 @@ To build against a newer ETS2LA, change `ETS2LA_REF` in the workflow to the new 
 - Even when a destination is set in the game's navigation, the green route line sometimes doesn't appear.
 - The north direction used by the compass hasn't been checked against the game yet, so it may point the wrong way.
 - Every traffic light within 150 m gets a marker, including lights for crossing roads and oncoming traffic. NavMap doesn't try to work out which light applies to your lane.
-- AR markers stay the same size on screen at any distance.
+- AR markers shrink with distance, but only down to 40% of full size, so far-away markers look larger than true perspective would make them.
 - NavMap can only mark traffic lights the game sends to ETS2LA. The Diagnostics section shows how many it received and how far away the nearest one is.
 - If you also have the standalone SignalHUD plugin enabled, both draw their own AR marker. Disable one of them.
