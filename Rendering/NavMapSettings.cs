@@ -14,4 +14,10 @@ public sealed class NavMapSettings
     public float BackgroundOpacityPercent = 90f;
     public int ZoomLevelIndex = 2;
     public bool HideOverlayWhenPaused;
+
+    // Traffic signal AR marker (see Signals.SignalViewSettings). Missing from
+    // settings files saved by older versions, so these defaults apply there.
+    public bool SignalArMarkerEnabled = true;
+    public float SignalArBackgroundOpacityPercent = 80f;
+    public float SignalArFontScalePercent = 100f;
 }

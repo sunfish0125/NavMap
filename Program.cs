@@ -1,3 +1,4 @@
+using ETS2LA.Logging;
 using ETS2LA.Overlay;
 using ETS2LA.Settings;
 using ETS2LA.Shared;
@@ -7,6 +8,7 @@ using Hexa.NET.ImGui;
 using NavMap.Map;
 using NavMap.Navigation;
 using NavMap.Rendering;
+using NavMap.Signals;
 using NavMap.Telemetry;
 
 namespace NavMap;
@@ -34,13 +36,16 @@ public class NavMapPlugin : Plugin
     private readonly NearbyMapCache nearbyCache = new();
     private readonly RouteGeometryBuilder routeBuilder = new();
     private readonly MapViewSettings viewSettings = new();
+    private readonly SignalViewSettings signalSettings = new();
     private readonly SettingsHandler settingsHandler = new();
+    private SignalHudFeature? signalHud;
+    private bool signalHudFaulted;
 
-    private float lastSavedOpacity;
-    private int lastSavedZoomLevel;
-    private bool lastSavedHideWhenPaused;
+    private PersistedSettings lastSaved;
 
     public MapViewSettings ViewSettings => viewSettings;
+    public SignalViewSettings SignalSettings => signalSettings;
+    public SignalHudFeature? SignalHud => signalHud;
 
     /// <summary>
     ///  Exposed for the Adjustments page's diagnostics section (see
@@ -59,9 +64,10 @@ public class NavMapPlugin : Plugin
         viewSettings.BackgroundOpacityPercent = persisted.BackgroundOpacityPercent;
         viewSettings.ZoomLevelIndex = persisted.ZoomLevelIndex;
         viewSettings.HideOverlayWhenPaused = persisted.HideOverlayWhenPaused;
-        lastSavedOpacity = viewSettings.BackgroundOpacityPercent;
-        lastSavedZoomLevel = viewSettings.ZoomLevelIndex;
-        lastSavedHideWhenPaused = viewSettings.HideOverlayWhenPaused;
+        signalSettings.ArMarkerEnabled = persisted.SignalArMarkerEnabled;
+        signalSettings.ArBackgroundOpacityPercent = Math.Clamp(persisted.SignalArBackgroundOpacityPercent, 0f, 100f);
+        signalSettings.ArFontScalePercent = Math.Clamp(persisted.SignalArFontScalePercent, 50f, 300f);
+        lastSaved = CapturePersistedSettings();
 
         base.Init();
     }
@@ -97,6 +103,8 @@ public class NavMapPlugin : Plugin
         pose.Start();
         routeState.Start();
 
+        StartSignalHud();
+
         Current = this;
     }
 
@@ -112,6 +120,63 @@ public class NavMapPlugin : Plugin
             nearbyCache.Refresh(pose.Position, viewSettings.RenderDistanceMeters);
             routeBuilder.Refresh(routeState, pose.Position, viewSettings.RenderDistanceMeters, pose.RouteDistanceMeters);
         }
+
+        TickSignalHud();
+    }
+
+    /// <summary>
+    ///  The traffic signal HUD is an add-on to the map, so any failure in it is
+    ///  contained here: it is logged once, shut down, and the map keeps running.
+    /// </summary>
+    private void StartSignalHud()
+    {
+        signalHudFaulted = false;
+        try
+        {
+            signalHud = new SignalHudFeature(signalSettings, routeState);
+            signalHud.Start();
+        }
+        catch (Exception exception)
+        {
+            DisableSignalHud(exception);
+        }
+    }
+
+    private void TickSignalHud()
+    {
+        if (signalHud is null)
+            return;
+
+        try
+        {
+            signalHud.Tick();
+        }
+        catch (Exception exception)
+        {
+            DisableSignalHud(exception);
+        }
+    }
+
+    private void StopSignalHud()
+    {
+        try
+        {
+            signalHud?.Stop();
+        }
+        catch (Exception exception)
+        {
+            Logger.Error($"NavMap could not stop the traffic signal HUD: {exception}");
+        }
+        signalHud = null;
+    }
+
+    private void DisableSignalHud(Exception exception)
+    {
+        if (!signalHudFaulted)
+            Logger.Error($"NavMap disabled the traffic signal HUD after an error: {exception}");
+
+        signalHudFaulted = true;
+        StopSignalHud();
     }
 
     /// <summary>
@@ -143,22 +208,42 @@ public class NavMapPlugin : Plugin
     /// </summary>
     private void SaveViewSettingsIfChanged()
     {
-        if (viewSettings.BackgroundOpacityPercent == lastSavedOpacity
-            && viewSettings.ZoomLevelIndex == lastSavedZoomLevel
-            && viewSettings.HideOverlayWhenPaused == lastSavedHideWhenPaused)
+        PersistedSettings current = CapturePersistedSettings();
+        if (current == lastSaved)
             return;
 
-        lastSavedOpacity = viewSettings.BackgroundOpacityPercent;
-        lastSavedZoomLevel = viewSettings.ZoomLevelIndex;
-        lastSavedHideWhenPaused = viewSettings.HideOverlayWhenPaused;
+        lastSaved = current;
 
         settingsHandler.Save(SettingsFileName, new NavMapSettings
         {
-            BackgroundOpacityPercent = lastSavedOpacity,
-            ZoomLevelIndex = lastSavedZoomLevel,
-            HideOverlayWhenPaused = lastSavedHideWhenPaused
+            BackgroundOpacityPercent = current.BackgroundOpacityPercent,
+            ZoomLevelIndex = current.ZoomLevelIndex,
+            HideOverlayWhenPaused = current.HideOverlayWhenPaused,
+            SignalArMarkerEnabled = current.SignalArMarkerEnabled,
+            SignalArBackgroundOpacityPercent = current.SignalArBackgroundOpacityPercent,
+            SignalArFontScalePercent = current.SignalArFontScalePercent
         });
     }
+
+    private PersistedSettings CapturePersistedSettings() => new(
+        viewSettings.BackgroundOpacityPercent,
+        viewSettings.ZoomLevelIndex,
+        viewSettings.HideOverlayWhenPaused,
+        signalSettings.ArMarkerEnabled,
+        signalSettings.ArBackgroundOpacityPercent,
+        signalSettings.ArFontScalePercent);
+
+    /// <summary>
+    ///  Value-equality snapshot of everything NavMapSettings persists, so
+    ///  SaveViewSettingsIfChanged can detect a change with a single comparison.
+    /// </summary>
+    private readonly record struct PersistedSettings(
+        float BackgroundOpacityPercent,
+        int ZoomLevelIndex,
+        bool HideOverlayWhenPaused,
+        bool SignalArMarkerEnabled,
+        float SignalArBackgroundOpacityPercent,
+        float SignalArFontScalePercent);
 
     /// <summary>
     ///  OverlayHandler.RegisterWindow copies WindowDefinition into its own
@@ -193,6 +278,8 @@ public class NavMapPlugin : Plugin
             OverlayHandler.Current.UnregisterWindow(mapWindow);
             windowRegistered = false;
         }
+
+        StopSignalHud();
 
         pose.Stop();
         routeState.Stop();

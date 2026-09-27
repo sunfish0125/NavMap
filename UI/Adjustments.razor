@@ -8,8 +8,9 @@
 
     @{
         var settings = _plugin?.ViewSettings;
+        var signalSettings = _plugin?.SignalSettings;
     }
-    @if (_plugin is null || settings is null)
+    @if (_plugin is null || settings is null || signalSettings is null)
     {
         <p class="text-description">Plugin is not enabled. Enable NavMap from Plugin Manager first.</p>
     }
@@ -27,6 +28,29 @@
                 Value="settings.HideOverlayWhenPaused"
                 ValueChanged="@(value => settings.HideOverlayWhenPaused = value)" />
 
+        <h2 class="text-lg font-semibold">Traffic signals</h2>
+
+        <Switch Title="Show AR marker"
+                Description="Mark the traffic light ahead in 3D AR with its remaining time and distance."
+                Value="signalSettings.ArMarkerEnabled"
+                ValueChanged="@(value => signalSettings.ArMarkerEnabled = value)" />
+
+        <Slider Title="AR marker background opacity"
+                Description="Opacity of the black background behind the AR marker."
+                Min="0" Max="100" Step="5"
+                Suffix="%"
+                Disabled="!signalSettings.ArMarkerEnabled"
+                Value="signalSettings.ArBackgroundOpacityPercent"
+                ValueChanged="@(value => signalSettings.ArBackgroundOpacityPercent = value)" />
+
+        <Slider Title="AR marker font size"
+                Description="Text size of the AR marker's remaining time and distance."
+                Min="50" Max="300" Step="10"
+                Suffix="%"
+                Disabled="!signalSettings.ArMarkerEnabled"
+                Value="signalSettings.ArFontScalePercent"
+                ValueChanged="@(value => signalSettings.ArFontScalePercent = value)" />
+
         <section class="rounded-sm border border-bg-darker bg-control-bg-dark p-4">
             <h2 class="mb-2 font-semibold">Diagnostics</h2>
             <div class="grid grid-cols-[repeat(auto-fit,minmax(9rem,1fr))] gap-2 text-sm">
@@ -37,6 +61,8 @@
                 <span>Nearby roads: @_plugin.NearbyCache.Segments.Count</span>
                 <span>POI icons: @_plugin.NearbyCache.Icons.Count</span>
                 <span>Route points: @(_plugin.RouteBuilder.Points.Count)@(_plugin.RouteBuilder.UsedFallbackSegment ? " (approx)" : "")</span>
+                <span>Signal HUD: @(_plugin.SignalHud is null ? "stopped" : _plugin.SignalHud.HasSignal ? "signal ahead" : "no signal")</span>
+                <span>Route signals: @(_plugin.SignalHud?.RouteSignalCount ?? 0)</span>
             </div>
             <p class="mt-2 text-description text-sm">This used to be drawn on the map itself; it now lives here to keep the Overlay uncluttered.</p>
         </section>
