@@ -9,9 +9,7 @@ namespace NavMap.Signals;
 public sealed class SignalViewSettings
 {
     /// <summary>
-    ///  Whether the AR marker is drawn next to the selected traffic light.
-    ///  Only affects the AR marker - the plain signal Overlay window is
-    ///  unaffected.
+    ///  Whether AR markers are drawn on nearby traffic lights.
     /// </summary>
     public bool ArMarkerEnabled = true;
 

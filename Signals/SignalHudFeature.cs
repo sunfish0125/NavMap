@@ -1,64 +1,60 @@
 using System.Numerics;
 
 using ETS2LA.Backend.Events;
-using ETS2LA.Game.Data;
 using ETS2LA.Game.SDK;
 using ETS2LA.Overlay;
 using ETS2LA.Overlay.AR;
 
 using Hexa.NET.ImGui;
 
-using NavMap.Map;
-using NavMap.Navigation;
-
-using TruckLib.ScsMap;
-
 using SignalSemaphore = ETS2LA.Game.SDK.Semaphore;
 
 namespace NavMap.Signals;
 
 /// <summary>
-///  Traffic signal HUD, ported from the standalone SignalHUD plugin. Picks the
-///  traffic light most likely to control the truck and marks it in 3D AR with
-///  its remaining time and distance (see SignalViewSettings.ArMarkerEnabled).
-///  SignalHUD's plain Overlay window was intentionally not ported.
+///  Traffic signal AR markers, originally ported from the standalone SignalHUD
+///  plugin. Marks every traffic light within MaximumSignalDistance at its own
+///  position with its color, remaining time and distance (see
+///  SignalViewSettings.ArMarkerEnabled).
+///
+///  SignalHUD picked a single "relevant" signal from the truck's heading and
+///  route, but that choice often came late or not at all, so every nearby
+///  signal is marked instead and the driver picks out the relevant one.
+///
+///  Markers are drawn straight onto the AR background draw list at each
+///  signal's projected screen position, rather than through
+///  ARRenderer.BeginWindow/EndWindow: those share a single render texture
+///  that is only sampled after all callbacks ran, so several windows in one
+///  frame would all show the last one's content.
 ///
 ///  Kept independent of the map: it owns its own semaphore subscription and
-///  AR callback, and only reads NavigationRouteState. Its AR names differ from
-///  the standalone SignalHUD plugin's so both can be enabled at the same time
-///  without unregistering each other.
+///  AR callback. Its AR name differs from the standalone SignalHUD plugin's
+///  so both can be enabled at the same time without unregistering each other.
 /// </summary>
 public sealed class SignalHudFeature
 {
-    private const float MaximumSignalDistance = 100f;
-    private const float RouteSignalMatchDistance = 35f;
-    private const float RouteCacheRefreshDistance = 25f;
+    private const float MaximumSignalDistance = 150f;
+    private const float MarkerHeightAboveSignal = 2.5f;
     private const string ArRendererName = "NavMap Signal AR";
-    private const string ArWindowName = "NavMapSignalMarker";
 
     private readonly SignalViewSettings settings;
-    private readonly NavigationRouteState routeState;
 
     private bool arRendererRegistered;
     private Action<SemaphoreData>? semaphoreHandler;
-    private SemaphoreData? latestSemaphoreData;
-    private SignalCandidate? selectedSignal;
-    private readonly List<Vector3> routeSignalPositions = new();
-    private Vector3 lastRouteCachePosition = new(float.NaN);
-    private NavigationData? cachedRouteData;
-    private MapData? cachedMap;
+    private SignalSemaphore[] latestSemaphores = Array.Empty<SignalSemaphore>();
+    private readonly List<SignalMarker> markers = new();
+    private SignalDiagnostics diagnostics = SignalDiagnostics.None;
 
-    public SignalHudFeature(SignalViewSettings settings, NavigationRouteState routeState)
+    public SignalHudFeature(SignalViewSettings settings)
     {
         this.settings = settings;
-        this.routeState = routeState;
     }
 
     /// <summary>
-    ///  Exposed for the Adjustments page's diagnostics section.
+    ///  Exposed for the Adjustments page's diagnostics section, to tell apart
+    ///  "the game isn't sending the signal yet" from "the marker isn't drawn".
     /// </summary>
-    public bool HasSignal => selectedSignal is not null;
-    public int RouteSignalCount => routeSignalPositions.Count;
+    public SignalDiagnostics Diagnostics => diagnostics;
 
     public void Start()
     {
@@ -91,145 +87,43 @@ public sealed class SignalHudFeature
             arRendererRegistered = false;
         }
 
-        latestSemaphoreData = null;
-        selectedSignal = null;
-        routeSignalPositions.Clear();
-        lastRouteCachePosition = new Vector3(float.NaN);
-        cachedRouteData = null;
-        cachedMap = null;
+        latestSemaphores = Array.Empty<SignalSemaphore>();
+        markers.Clear();
+        diagnostics = SignalDiagnostics.None;
     }
 
+    /// <summary>
+    ///  Only refreshes the diagnostics - the markers themselves are collected
+    ///  every frame in RenderSignalAr, so they follow the 60Hz semaphore data
+    ///  rather than the plugin's TickRate.
+    /// </summary>
     public void Tick()
     {
-        CameraData truck = CameraProvider.Current.GetCurrentData();
-        UpdateRouteSignalPositions(truck.truckPosition);
-        selectedSignal = SelectSignal(latestSemaphoreData, truck, routeSignalPositions);
-    }
-
-    private void OnSemaphores(SemaphoreData data)
-    {
-        latestSemaphoreData = data;
-    }
-
-    private void UpdateRouteSignalPositions(Vector3 truckPosition)
-    {
-        MapData? map = MapDataSource.TryGetCurrentMap();
-        NavigationData? navigation = routeState.Latest;
-        bool refreshDue = !ReferenceEquals(map, cachedMap)
-            || !ReferenceEquals(navigation, cachedRouteData)
-            || float.IsNaN(lastRouteCachePosition.X)
-            || Vector3.DistanceSquared(lastRouteCachePosition, truckPosition)
-                >= RouteCacheRefreshDistance * RouteCacheRefreshDistance;
-        if (!refreshDue)
-            return;
-
-        cachedMap = map;
-        cachedRouteData = navigation;
-        lastRouteCachePosition = truckPosition;
-        routeSignalPositions.Clear();
-        if (map is null || navigation is null)
-            return;
-
-        var prefabs = new Dictionary<ulong, Prefab>();
-        IReadOnlyList<Node> nearbyNodes = map.Nodes.Within(
-            truckPosition.X - MaximumSignalDistance,
-            truckPosition.Z - MaximumSignalDistance,
-            truckPosition.X + MaximumSignalDistance,
-            truckPosition.Z + MaximumSignalDistance);
-
-        foreach (Node node in nearbyNodes)
-        {
-            if (node.ForwardItem is Prefab forwardPrefab)
-                prefabs.TryAdd(forwardPrefab.Uid, forwardPrefab);
-            if (node.BackwardItem is Prefab backwardPrefab)
-                prefabs.TryAdd(backwardPrefab.Uid, backwardPrefab);
-        }
-
-        foreach (Prefab prefab in prefabs.Values)
-        {
-            try
-            {
-                List<Node> routeNodes = prefab.Nodes
-                    .OfType<Node>()
-                    .Select(node => new { Node = node, Index = navigation.IndexFor(node.Uid) })
-                    .Where(entry => entry.Index >= 0)
-                    .OrderBy(entry => entry.Index)
-                    .Select(entry => entry.Node)
-                    .ToList();
-                if (routeNodes.Count < 2)
-                    continue;
-
-                ParsedPrefab parsedPrefab = new(prefab);
-                (List<PrefabPath> bestPaths, _) = parsedPrefab.GetPathsFromNodeToNode(
-                    routeNodes[0], routeNodes[1], truckPosition);
-                PrefabPath? routePath = bestPaths.FirstOrDefault();
-                if (routePath is null)
-                    continue;
-
-                foreach (ParsedSemaphore semaphore in routePath.GetSemaphores())
-                    routeSignalPositions.Add(semaphore.GetWorldOrientedPoint().Position);
-            }
-            catch
-            {
-                // Map descriptors can be unavailable while map data is loading. Fall back to direction-only matching.
-            }
-        }
-    }
-
-    private static SignalCandidate? SelectSignal(
-        SemaphoreData? data,
-        CameraData truck,
-        IReadOnlyList<Vector3> routeSignals)
-    {
-        if (data is null)
-            return null;
-
-        Vector3 forward = Vector3.Transform(Vector3.UnitZ, truck.truckRotation);
-        forward.Y = 0f;
-        if (forward.LengthSquared() < 0.001f)
-            return null;
-
-        forward = Vector3.Normalize(forward);
-        SignalCandidate? best = null;
-        float bestScore = float.NegativeInfinity;
-
-        foreach (SignalSemaphore semaphore in data.semaphores)
+        Vector3 truckPosition = CameraProvider.Current.GetCurrentData().truckPosition;
+        int trafficLights = 0;
+        int inRange = 0;
+        float? nearest = null;
+        foreach (SignalSemaphore semaphore in latestSemaphores)
         {
             if (semaphore.type != SemaphoreType.TRAFFICLIGHT)
                 continue;
 
-            Vector3 signalPosition = semaphore.GetWorldCoordinates();
-            Vector3 offset = signalPosition - truck.truckPosition;
-            float distance = offset.Length();
-            Vector3 horizontalOffset = new(offset.X, 0f, offset.Z);
-            float horizontalDistance = horizontalOffset.Length();
-            if (distance > MaximumSignalDistance || horizontalDistance < 0.1f)
-                continue;
-
-            Vector3 direction = horizontalOffset / horizontalDistance;
-            float alignment = Vector3.Dot(forward, direction);
-            if (alignment <= 0f)
-                continue;
-
-            float lateralOffset = MathF.Abs(forward.X * horizontalOffset.Z - forward.Z * horizontalOffset.X);
-            // A crossing-road signal may match the same prefab route. Keep route
-            // matching as a small bonus, while distance remains the main criterion.
-            float score = -distance + alignment * 5f - lateralOffset * 0.75f;
-            SignalCandidate candidate = new(semaphore, distance);
-            bool matchesRoute = routeSignals.Any(routeSignalPosition =>
-                Vector3.DistanceSquared(routeSignalPosition, signalPosition)
-                    <= RouteSignalMatchDistance * RouteSignalMatchDistance);
-            if (matchesRoute)
-                score += 5f;
-
-            if (score > bestScore)
-            {
-                bestScore = score;
-                best = candidate;
-            }
+            trafficLights++;
+            float distance = Vector3.Distance(semaphore.GetWorldCoordinates(), truckPosition);
+            if (distance <= MaximumSignalDistance)
+                inRange++;
+            if (nearest is null || distance < nearest)
+                nearest = distance;
         }
 
-        return best;
+        diagnostics = new SignalDiagnostics(trafficLights, inRange, nearest);
+    }
+
+    private void OnSemaphores(SemaphoreData data)
+    {
+        // SemaphoreProvider reuses the same SemaphoreData instance and swaps in
+        // a new array on every update, so keep the array itself.
+        latestSemaphores = data.semaphores;
     }
 
     private void RenderSignalAr()
@@ -237,68 +131,84 @@ public sealed class SignalHudFeature
         if (!settings.ArMarkerEnabled)
             return;
 
-        SignalCandidate? signal = selectedSignal;
-        if (signal is null)
+        SignalSemaphore[] semaphores = latestSemaphores;
+        if (semaphores.Length == 0)
             return;
 
-        Vector3 position = signal.Semaphore.GetWorldCoordinates();
-        uint color = signal.Semaphore.GetColor();
+        var ar = OverlayHandler.Current.AR;
+        Vector3 truckPosition = CameraProvider.Current.GetCurrentData().truckPosition;
+        int screenWidth = (int)OverlayHandler.Current.OverlayWidth;
+        int screenHeight = (int)OverlayHandler.Current.OverlayHeight;
+
+        markers.Clear();
+        foreach (SignalSemaphore semaphore in semaphores)
+        {
+            if (semaphore.type != SemaphoreType.TRAFFICLIGHT)
+                continue;
+
+            Vector3 signalPosition = semaphore.GetWorldCoordinates();
+            float distance = Vector3.Distance(signalPosition, truckPosition);
+            if (distance > MaximumSignalDistance)
+                continue;
+
+            var anchor = new ARCoordinate(signalPosition + Vector3.UnitY * MarkerHeightAboveSignal, ARCoordinateCenter.World);
+            // Null when the signal is behind the camera.
+            Vector2? screenPosition = ar.WorldToScreen(ar.ARCoordinateToVector3(anchor), screenWidth, screenHeight);
+            if (screenPosition is Vector2 position)
+                markers.Add(new SignalMarker(semaphore, distance, position));
+        }
+
+        if (markers.Count == 0)
+            return;
+
+        // Farthest first, so nearer markers are drawn on top where they overlap.
+        markers.Sort((a, b) => b.Distance.CompareTo(a.Distance));
+
         float backgroundOpacity = Math.Clamp(settings.ArBackgroundOpacityPercent / 100f, 0f, 1f);
         float fontScale = Math.Clamp(settings.ArFontScalePercent / 100f, 0.5f, 3f);
         uint backgroundColor = (uint)Math.Clamp(
             MathF.Round(backgroundOpacity * byte.MaxValue), 0f, byte.MaxValue);
-        var ar = OverlayHandler.Current.AR;
-        CameraData camera = CameraProvider.Current.GetCurrentData();
-        ar.BeginWindow(
-            ArWindowName,
-            ImGuiWindowFlags.NoDecoration | ImGuiWindowFlags.NoBackground | ImGuiWindowFlags.NoScrollbar,
-            forceWidth: 140,
-            forceHeight: 120);
+
+        ImGui.PushFont(ImGui.GetFont(), ImGui.GetStyle().FontSizeBase * fontScale);
         try
         {
-            ImGui.PushFont(ImGui.GetFont(), ImGui.GetStyle().FontSizeBase * fontScale);
-            try
-            {
-                ImDrawListPtr drawList = ImGui.GetWindowDrawList();
-                Vector2 windowPosition = ImGui.GetWindowPos();
-                Vector2 markerCenter = windowPosition + new Vector2(70f, 34f);
-                uint markerColor = ToImGuiColor(color);
-
-                // The indicator and readout are drawn into one AR texture, so they
-                // remain a single marker regardless of camera angle or distance.
-                drawList.AddRectFilled(
-                    windowPosition + new Vector2(10f, 4f),
-                    windowPosition + new Vector2(130f, 116f),
-                    ToImGuiColor(backgroundColor),
-                    rounding: 12f);
-                drawList.AddCircleFilled(markerCenter, 20f, ToImGuiColor(WithAlpha(color, 20)));
-                drawList.AddCircleFilled(markerCenter, 14f, ToImGuiColor(WithAlpha(color, 45)));
-                drawList.AddCircleFilled(markerCenter, 9f, ToImGuiColor(WithAlpha(color, 100)));
-                drawList.AddCircleFilled(markerCenter, 6f, markerColor);
-
-                string readout = $"{signal.Semaphore.time_remaining:0.0}s\n{signal.Distance:0}m";
-                Vector2 readoutSize = ImGui.CalcTextSize(readout);
-                drawList.AddText(
-                    new Vector2(markerCenter.X - readoutSize.X / 2f, markerCenter.Y + 25f),
-                    markerColor,
-                    readout);
-            }
-            finally
-            {
-                ImGui.PopFont();
-            }
+            ImDrawListPtr drawList = ImGui.GetBackgroundDrawList();
+            foreach (SignalMarker marker in markers)
+                DrawMarker(drawList, marker, backgroundColor);
         }
         finally
         {
-            ar.EndWindow(
-                new ARCoordinate(position + Vector3.UnitY * 2.5f, ARCoordinateCenter.World),
-                camera.rotation,
-                width: 3f,
-                // With the current ETS2LA, EndWindow's default UVs put the
-                // window's top edge at the bottom of the AR quad, drawing the
-                // marker upside down.
-                invertY: true);
+            ImGui.PopFont();
         }
+    }
+
+    /// <summary>
+    ///  Same look as SignalHUD's marker (glowing dot with the remaining time and
+    ///  distance below it, on a rounded black background), centered on the
+    ///  signal's screen position. The background grows to fit the text, since
+    ///  the font size is adjustable.
+    /// </summary>
+    private static void DrawMarker(ImDrawListPtr drawList, SignalMarker marker, uint backgroundColor)
+    {
+        uint color = marker.Semaphore.GetColor();
+        uint markerColor = ToImGuiColor(color);
+        Vector2 center = marker.ScreenPosition;
+
+        string readout = $"{marker.Semaphore.time_remaining:0.0}s\n{marker.Distance:0}m";
+        Vector2 readoutSize = ImGui.CalcTextSize(readout);
+        Vector2 readoutPosition = new(center.X - readoutSize.X / 2f, center.Y + 25f);
+
+        float halfWidth = MathF.Max(30f, readoutSize.X / 2f + 10f);
+        drawList.AddRectFilled(
+            new Vector2(center.X - halfWidth, center.Y - 30f),
+            new Vector2(center.X + halfWidth, readoutPosition.Y + readoutSize.Y + 8f),
+            ToImGuiColor(backgroundColor),
+            rounding: 12f);
+        drawList.AddCircleFilled(center, 20f, ToImGuiColor(WithAlpha(color, 20)));
+        drawList.AddCircleFilled(center, 14f, ToImGuiColor(WithAlpha(color, 45)));
+        drawList.AddCircleFilled(center, 9f, ToImGuiColor(WithAlpha(color, 100)));
+        drawList.AddCircleFilled(center, 6f, markerColor);
+        drawList.AddText(readoutPosition, markerColor, readout);
     }
 
     private static uint WithAlpha(uint color, byte alpha)
@@ -314,5 +224,13 @@ public sealed class SignalHudFeature
             | ((rgba & 0x000000FF) << 24);
     }
 
-    private sealed record SignalCandidate(SignalSemaphore Semaphore, float Distance);
+    private readonly record struct SignalMarker(SignalSemaphore Semaphore, float Distance, Vector2 ScreenPosition);
+}
+
+/// <param name="TrafficLights">Traffic lights in the latest semaphore data from the game.</param>
+/// <param name="InRange">Of those, how many are within the marker distance.</param>
+/// <param name="NearestMeters">Distance to the nearest one, or null if there are none.</param>
+public sealed record SignalDiagnostics(int TrafficLights, int InRange, float? NearestMeters)
+{
+    public static readonly SignalDiagnostics None = new(0, 0, null);
 }

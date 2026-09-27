@@ -133,7 +133,7 @@ public class NavMapPlugin : Plugin
         signalHudFaulted = false;
         try
         {
-            signalHud = new SignalHudFeature(signalSettings, routeState);
+            signalHud = new SignalHudFeature(signalSettings);
             signalHud.Start();
         }
         catch (Exception exception)

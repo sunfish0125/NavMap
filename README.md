@@ -16,7 +16,7 @@ It draws the route the game's own navigation has already planned. NavMap does no
 - Icons for companies, gas stations, service points and garages (only shown when ETS2LA's data fidelity is set to Extreme)
 - `-` / `+` zoom buttons to show 500 m, 1000 m, 1500 m or 2000 m across the map
 - A map window you can move anywhere on screen and resize freely
-- A 3D AR marker on the traffic light ahead, showing its color, remaining time and distance (merged from the SignalHUD plugin)
+- AR markers on every traffic light within 150 m, drawn at the light's position and showing its color, remaining time and distance (merged from the SignalHUD plugin)
 
 ## Settings
 
@@ -24,7 +24,7 @@ Open **Plugin Manager → NavMap → Adjustments** to change:
 
 - **Background opacity**: how see-through the map window's background is
 - **Hide when paused**: closes the map window while the game is paused
-- **Traffic signals → Show AR marker**: shows or hides the 3D AR marker on the traffic light ahead
+- **Traffic signals → Show AR marker**: shows or hides the AR markers on nearby traffic lights
 - **Traffic signals → AR marker background opacity**: how see-through the AR marker's black background is (0–100%)
 - **Traffic signals → AR marker font size**: text size of the AR marker (50–300%)
 
@@ -136,5 +136,7 @@ To build against a newer ETS2LA, change `ETS2LA_REF` in the workflow to the new 
 - NavMap also shows roads your truck can't enter, not only roads it can drive on.
 - Even when a destination is set in the game's navigation, the green route line sometimes doesn't appear.
 - The north direction used by the compass hasn't been checked against the game yet, so it may point the wrong way.
-- The traffic signal is picked by distance and direction within 100 m, with a small bonus for signals on the navigation route. At intersections or on multi-lane roads it can still pick a signal for an adjacent lane, a crossing road or oncoming traffic.
+- Every traffic light within 150 m gets a marker, including lights for crossing roads and oncoming traffic. NavMap doesn't try to work out which light applies to your lane.
+- AR markers stay the same size on screen at any distance.
+- NavMap can only mark traffic lights the game sends to ETS2LA. The Diagnostics section shows how many it received and how far away the nearest one is.
 - If you also have the standalone SignalHUD plugin enabled, both draw their own AR marker. Disable one of them.

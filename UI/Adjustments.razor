@@ -9,6 +9,7 @@
     @{
         var settings = _plugin?.ViewSettings;
         var signalSettings = _plugin?.SignalSettings;
+        var signals = _plugin?.SignalHud?.Diagnostics;
     }
     @if (_plugin is null || settings is null || signalSettings is null)
     {
@@ -31,7 +32,7 @@
         <h2 class="text-lg font-semibold">Traffic signals</h2>
 
         <Switch Title="Show AR marker"
-                Description="Mark the traffic light ahead in 3D AR with its remaining time and distance."
+                Description="Mark nearby traffic lights in AR with their remaining time and distance."
                 Value="signalSettings.ArMarkerEnabled"
                 ValueChanged="@(value => signalSettings.ArMarkerEnabled = value)" />
 
@@ -61,8 +62,8 @@
                 <span>Nearby roads: @_plugin.NearbyCache.Segments.Count</span>
                 <span>POI icons: @_plugin.NearbyCache.Icons.Count</span>
                 <span>Route points: @(_plugin.RouteBuilder.Points.Count)@(_plugin.RouteBuilder.UsedFallbackSegment ? " (approx)" : "")</span>
-                <span>Signal HUD: @(_plugin.SignalHud is null ? "stopped" : _plugin.SignalHud.HasSignal ? "signal ahead" : "no signal")</span>
-                <span>Route signals: @(_plugin.SignalHud?.RouteSignalCount ?? 0)</span>
+                <span>Signals in range: @(signals is null ? "stopped" : $"{signals.InRange} / {signals.TrafficLights}")</span>
+                <span>Nearest signal: @(signals?.NearestMeters is float nearest ? $"{nearest:0} m" : "-")</span>
             </div>
             <p class="mt-2 text-description text-sm">This used to be drawn on the map itself; it now lives here to keep the Overlay uncluttered.</p>
         </section>
