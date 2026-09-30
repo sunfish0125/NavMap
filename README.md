@@ -1,5 +1,7 @@
 # NavMap
 
+English | [日本語](README.ja.md)
+
 NavMap is an [ETS2LA](https://github.com/ETS2LA/ETS2LA) plugin that shows a 2D navigation map for Euro Truck Simulator 2 and American Truck Simulator in the ETS2LA Overlay.
 
 It draws the route the game's own navigation has already planned. NavMap does not calculate a route itself. When the game recalculates the route or you change the destination, the map updates to match.
