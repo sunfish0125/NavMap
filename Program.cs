@@ -1,3 +1,4 @@
+using ETS2LA.Game.Telemetry;
 using ETS2LA.Logging;
 using ETS2LA.Overlay;
 using ETS2LA.Settings;
@@ -77,7 +78,7 @@ public class NavMapPlugin : Plugin
     public override PluginInformation Info => new()
     {
         Id = "sunfish.navmap",
-        Version = "0.2.0",
+        Version = "0.2.1",
         Name = "NavMap",
         Description = "Custom navigation map using the game's existing navigation route.",
         AuthorName = "Sunfish",
@@ -188,7 +189,10 @@ public class NavMapPlugin : Plugin
     /// </summary>
     private void UpdateWindowVisibility()
     {
-        bool shouldBeVisible = !(viewSettings.HideOverlayWhenPaused && pose.IsPaused);
+        // Telemetry inactive (game not running / not finished starting up):
+        // keep the window closed, same as DashboardHUD.
+        bool gameReady = GameTelemetry.Current.GetCurrentData().sdkActive;
+        bool shouldBeVisible = gameReady && !(viewSettings.HideOverlayWhenPaused && pose.IsPaused);
         if (shouldBeVisible == windowVisible)
             return;
 
